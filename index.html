@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>المجلس</title>
+<style>
+:root{--bg:#f1eef8;--ink:#1d1840;--mut:#6b6591;--card:#fff;--line:#d6d0ea;--gold:#b7791f;--on:#2f7d5b;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#14102e;--ink:#ece8fa;--mut:#9d97c4;--card:#1d1842;--line:#3a3370;--gold:#e0a43a;--on:#5fd3a0;color-scheme:dark}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:17px/1.7 "Noto Naskh Arabic","Geeza Pro",serif;display:flex;justify-content:center;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{width:100%;max-width:460px;padding:20px 18px;display:flex;flex-direction:column;gap:14px}
+h1{margin:6px 0 0;text-align:center;font-size:30px}p{margin:0;color:var(--mut);text-align:center}
+input,button{font:inherit;border-radius:12px;border:1px solid var(--line);padding:12px 14px;background:var(--card);color:var(--ink)}
+input{width:100%;text-align:center;letter-spacing:.15em;direction:ltr}
+button{background:var(--gold);color:#14102e;border:0;font-weight:700}
+:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+svg{width:100%;max-width:300px;margin:0 auto;display:block}
+#err{color:#c0392b;min-height:1.6em;text-align:center}
+#log{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.m{max-width:85%;padding:8px 12px;border-radius:12px;background:var(--bg);overflow-wrap:anywhere}
+.m.me{align-self:flex-start;background:var(--gold);color:#14102e}.m small{display:block;opacity:.7;font-size:13px}
+.row{display:flex;gap:8px}.row input{letter-spacing:0;direction:rtl;text-align:right}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>المجلس</h1>
+<svg id="tbl" viewBox="0 0 300 260" role="img" aria-label="طاولة المجلس"></svg>
+<p id="st">أدخل رمزك السري</p>
+<section id="gate" style="display:flex;flex-direction:column;gap:10px">
+<input id="code" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" maxlength="14" aria-label="رمز المقعد">
+<button id="go">دخول</button><div id="err" role="alert"></div>
+</section>
+<section id="room" hidden style="display:flex;flex-direction:column;gap:10px">
+<div id="log" aria-live="polite"></div>
+<div class="row"><input id="msg" placeholder="اكتب رسالة سرية" autocomplete="off"><button id="send">إرسال</button></div>
+</section>
+</main>
+<script>
+// غيّر هذا السطر إلى عنوان الخادم بعد نشره على Cloudflare
+const WS_URL = "wss://majlis-relay.YOUR-NAME.workers.dev/ws";
+const N = 5, AR = ["١","٢","٣","٤","٥"], $ = s => document.querySelector(s), enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u))), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+let ws, seat = -1, kp, roster = [], gkey = null, present = new Set();
+
+function draw() {
+  let s = '<ellipse cx="150" cy="130" rx="78" ry="52" fill="none" stroke="var(--line)" stroke-width="3"/>';
+  for (let i = 0; i < N; i++) {
+    const a = -Math.PI/2 + i*2*Math.PI/N, x = 150 + Math.cos(a)*112, y = 130 + Math.sin(a)*88, on = present.has(i), me = i === seat;
+    s += `<circle cx="${x}" cy="${y}" r="21" fill="${on?"var(--on)":"var(--card)"}" stroke="${me?"var(--gold)":"var(--line)"}" stroke-width="${me?4:2}"/><text x="${x}" y="${y+6}" text-anchor="middle" font-size="18" fill="${on?"#0b1f17":"var(--mut)"}">${AR[i]}</text>`;
+  }
+  $("#tbl").innerHTML = s;
+  if (seat < 0) return;
+  const full = present.size === N;
+  $("#room").hidden = !(full && gkey);
+  $("#st").textContent = !full ? `الغرفة مقفلة: حضر ${present.size} من ${N}` : gkey ? "اكتمل المجلس. المحادثة مشفرة." : "جارٍ تبادل مفاتيح التشفير...";
+}
+async function pairKey(theirPub) {
+  const pub = await crypto.subtle.importKey("raw", unb64(theirPub), { name: "ECDH", namedCurve: "P-256" }, false, []);
+  return crypto.subtle.deriveKey({ name: "ECDH", public: pub }, kp.privateKey, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+const relay = (to, d) => ws.send(JSON.stringify({ t: "relay", to, d }));
+async function onRoster(list) {
+  roster = list; present = new Set(list.map(x => x.seat)); gkey = null;
+  if (present.size === N && seat === Math.min(...present)) { // أصغر مقعد يولّد مفتاح الغرفة ويلفّه لكل عضو
+    const k = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const raw = await crypto.subtle.exportKey("raw", k);
+    for (const p of list.filter(x => x.seat !== seat)) {
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await pairKey(p.pub), raw);
+      relay(p.seat, { k: 1, iv: b64(iv), ct: b64(ct) });
+    }
+    gkey = k;
+  }
+  draw();
+}
+async function onRelay(m) {
+  const d = m.d || {};
+  if (d.k) {
+    const leader = roster.find(x => x.seat === m.from); if (!leader || m.from !== Math.min(...present)) return;
+    try {
+      const raw = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(d.iv) }, await pairKey(leader.pub), unb64(d.ct));
+      gkey = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]); draw();
+    } catch {}
+  } else if (gkey && d.ct) {
+    try { add(dec.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(d.iv) }, gkey, unb64(d.ct))), m.from, false); } catch {}
+  }
+}
+function add(t, s, me) {
+  const d = document.createElement("div"); d.className = "m" + (me ? " me" : "");
+  const a = document.createElement("small"); a.textContent = "مقعد " + AR[s];
+  const b = document.createElement("span"); b.textContent = t; d.append(a, b); $("#log").append(d); $("#log").scrollTop = 1e9;
+}
+async function send() {
+  const t = $("#msg").value.trim(); if (!t || !gkey) return; $("#msg").value = "";
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, gkey, enc.encode(t));
+  relay("all", { iv: b64(iv), ct: b64(ct) }); add(t, seat, true);
+}
+async function enter() {
+  $("#err").textContent = ""; $("#go").disabled = true;
+  kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveKey"]);
+  const pub = b64(await crypto.subtle.exportKey("raw", kp.publicKey));
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => ws.send(JSON.stringify({ t: "join", code: $("#code").value, pub }));
+  ws.onmessage = async e => {
+    const m = JSON.parse(e.data);
+    if (m.t === "ok") { seat = m.seat; $("#gate").hidden = true; draw(); }
+    else if (m.t === "err") { $("#err").textContent = m.e === "used" ? "هذا المقعد مستخدم الآن من جهاز آخر." : "الرمز غير صحيح."; $("#go").disabled = false; }
+    else if (m.t === "roster") onRoster(m.seats);
+    else if (m.t === "relay") onRelay(m);
+  };
+  ws.onclose = () => { if (seat >= 0) { seat = -1; gkey = null; present = new Set(); $("#gate").hidden = false; $("#room").hidden = true; $("#log").textContent = ""; $("#st").textContent = "انقطع الاتصال. أدخل رمزك من جديد."; draw(); } $("#go").disabled = false; };
+  ws.onerror = () => { $("#err").textContent = "تعذر الاتصال بالخادم."; $("#go").disabled = false; };
+}
+$("#go").onclick = enter; $("#code").onkeydown = e => e.key === "Enter" && enter();
+$("#send").onclick = send; $("#msg").onkeydown = e => e.key === "Enter" && send();
+draw();
+</script>
+</body>
+</html>
