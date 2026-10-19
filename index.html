@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>المجلس</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1d1840">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
 :root{--bg:#f1eef8;--ink:#1d1840;--mut:#6b6591;--card:#fff;--line:#d6d0ea;--gold:#b7791f;--on:#2f7d5b;color-scheme:light}
 @media(prefers-color-scheme:dark){:root{--bg:#14102e;--ink:#ece8fa;--mut:#9d97c4;--card:#1d1842;--line:#3a3370;--gold:#e0a43a;--on:#5fd3a0;color-scheme:dark}}
@@ -26,6 +32,7 @@ svg{width:100%;max-width:300px;margin:0 auto;display:block}
 </head>
 <body>
 <main>
+<img src="icon-192.png" alt="" width="84" height="84" style="margin:0 auto;border-radius:20px;display:block">
 <h1>المجلس</h1>
 <svg id="tbl" viewBox="0 0 300 260" role="img" aria-label="طاولة المجلس"></svg>
 <p id="st">أدخل رمزك السري</p>
@@ -118,6 +125,7 @@ async function enter() {
 $("#go").onclick = enter; $("#code").onkeydown = e => e.key === "Enter" && enter();
 $("#send").onclick = send; $("#msg").onkeydown = e => e.key === "Enter" && send();
 draw();
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 </script>
 </body>
 </html>
