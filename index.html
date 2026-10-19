@@ -40,7 +40,7 @@ svg{width:100%;max-width:300px;margin:0 auto;display:block}
 </main>
 <script>
 // غيّر هذا السطر إلى عنوان الخادم بعد نشره على Cloudflare
-const WS_URL = "wss://majlis-relay.YOUR-NAME.workers.dev/ws";
+const WS_URL = "wss://worker.houssemsalhi2022.workers.dev/ws";
 const N = 5, AR = ["١","٢","٣","٤","٥"], $ = s => document.querySelector(s), enc = new TextEncoder(), dec = new TextDecoder();
 const b64 = u => btoa(String.fromCharCode(...new Uint8Array(u))), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 let ws, seat = -1, kp, roster = [], gkey = null, present = new Set();
